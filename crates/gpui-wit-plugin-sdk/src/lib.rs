@@ -88,6 +88,11 @@ impl<V: 'static> Cx<V> {
         Listener(self.handlers.len() as u32 - 1)
     }
 
+    /// Keeps the event being handled from the elements further out.
+    pub fn stop_propagation(&mut self) {
+        AFTER.with(|after| (after.borrow_mut()).push(Box::new(|| Mutation::StopPropagation)));
+    }
+
     /// Makes a child view, as GPUI's `cx.new` makes an entity. Keep the
     /// handle in the view's state and place it from `render`.
     // Named for GPUI's `cx.new`, which returns the entity, not the context.

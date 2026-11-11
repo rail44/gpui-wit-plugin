@@ -38,6 +38,8 @@ interface tree {
         scroll-by(tuple<node-id, f32, f32>),
         /// Scrolls the node's content to this many pixels from its top.
         scroll-to(tuple<node-id, f32>),
+        /// Keeps the event being handled from the elements further out.
+        stop-propagation,
     }
 }
 

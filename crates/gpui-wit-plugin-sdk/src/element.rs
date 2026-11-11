@@ -182,6 +182,14 @@ impl Element {
             .style(&["flex_basis"], "0%")
     }
 
+    pub fn flex_none(self) -> Self {
+        self.style(&["flex_grow"], 0.).style(&["flex_shrink"], 0.)
+    }
+
+    pub fn flex_wrap(self) -> Self {
+        self.style(&["flex_wrap"], "Wrap")
+    }
+
     pub fn items_center(self) -> Self {
         self.style(&["align_items"], "Center")
     }
@@ -198,6 +206,18 @@ impl Element {
         self.style(&["size", "height"], length.into().0)
     }
 
+    pub fn w_full(self) -> Self {
+        self.w(relative(1.))
+    }
+
+    pub fn min_w(self, length: impl Into<Length>) -> Self {
+        self.style(&["min_size", "width"], length.into().0)
+    }
+
+    pub fn min_h(self, length: impl Into<Length>) -> Self {
+        self.style(&["min_size", "height"], length.into().0)
+    }
+
     pub fn size_full(self) -> Self {
         self.w(relative(1.)).h(relative(1.))
     }
@@ -212,6 +232,14 @@ impl Element {
 
     pub fn py(self, length: impl Into<Length>) -> Self {
         self.each("padding", &["top", "bottom"], length.into())
+    }
+
+    pub fn pt(self, length: impl Into<Length>) -> Self {
+        self.each("padding", &["top"], length.into())
+    }
+
+    pub fn pb(self, length: impl Into<Length>) -> Self {
+        self.each("padding", &["bottom"], length.into())
     }
 
     pub fn gap(self, length: impl Into<Length>) -> Self {
@@ -241,6 +269,10 @@ impl Element {
 
     pub fn text_size(self, length: impl Into<Length>) -> Self {
         self.style(&["text", "font_size"], length.into().0)
+    }
+
+    pub fn line_height(self, length: impl Into<Length>) -> Self {
+        self.style(&["text", "line_height"], length.into().0)
     }
 
     pub fn font_weight(self, weight: f32) -> Self {

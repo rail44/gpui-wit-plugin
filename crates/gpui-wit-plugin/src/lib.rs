@@ -23,10 +23,10 @@ use std::{any::Any, collections::HashMap, path::Path, rc::Rc};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle, Hsla,
-    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, ScrollHandle,
-    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window, div,
-    point, px,
+    AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle,
+    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
+    ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity,
+    Window, div, point, px,
 };
 use serde_json::{Value, json};
 use wasmtime::{
@@ -159,8 +159,19 @@ pub struct PluginView {
     plugin: Plugin,
     nodes: HashMap<u64, Node>,
     root: Option<u64>,
+    /// The view's own focus, which the root node tracks: focusing the view
+    /// sends keys to the plugin's root element.
+    focus: FocusHandle,
+    /// Whether the plugin asked that the event it just handled stop here.
+    stop: bool,
     /// Why the plugin stopped, drawn in its place.
     error: Option<SharedString>,
+}
+
+impl Focusable for PluginView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus.clone()
+    }
 }
 
 impl PluginView {
@@ -186,6 +197,8 @@ impl PluginView {
             plugin,
             nodes: HashMap::new(),
             root: None,
+            focus: cx.focus_handle(),
+            stop: false,
             error: None,
         };
         view.apply(batch, window, cx);
@@ -273,6 +286,10 @@ impl PluginView {
                 self.root = Some(id);
                 return Ok(());
             }
+            Mutation::StopPropagation => {
+                self.stop = true;
+                return Ok(());
+            }
             Mutation::SetStyle((id, _))
             | Mutation::SetText((id, _))
             | Mutation::SetProps((id, _))
@@ -282,6 +299,8 @@ impl PluginView {
             | Mutation::ScrollTo((id, _))
             | Mutation::Focus(id) => (id, mutation),
         };
+        // The root node's focus is the view's own.
+        let view_focus = (self.root == Some(id)).then(|| self.focus.clone());
         let node = self.nodes.get_mut(&id).ok_or_else(|| {
             anyhow::anyhow!("the plugin changed node {id}, which it has not made")
         })?;
@@ -292,13 +311,14 @@ impl PluginView {
             Mutation::SetChildren((_, children)) => node.children = children,
             Mutation::Listen((_, events)) => {
                 // Keys reach the element that has focus.
-                if events.iter().any(|event| event == "key_down") {
+                if view_focus.is_none() && events.iter().any(|event| event == "key_down") {
                     node.focus.get_or_insert_with(|| cx.focus_handle());
                 }
                 node.events = events;
             }
             Mutation::Focus(_) => {
-                let handle = node.focus.get_or_insert_with(|| cx.focus_handle()).clone();
+                let handle = view_focus
+                    .unwrap_or_else(|| node.focus.get_or_insert_with(|| cx.focus_handle()).clone());
                 window.focus(&handle, cx);
             }
             Mutation::ScrollBy((_, pixels, pages)) => {
@@ -331,7 +351,11 @@ impl PluginView {
             Kind::Element => {
                 let mut element = div().id(ElementId::Integer(id));
                 *element.style() = node.style.clone();
-                if let Some(focus) = &node.focus {
+                let focus = match self.root == Some(id) {
+                    true => Some(&self.focus),
+                    false => node.focus.as_ref(),
+                };
+                if let Some(focus) = focus {
                     element = element.track_focus(focus);
                 }
                 if let Some(scroll) = &node.scroll {
@@ -341,7 +365,10 @@ impl PluginView {
                     element = match event.as_str() {
                         "click" => element.on_click(cx.listener(
                             move |view, _: &ClickEvent, window, cx| {
-                                view.dispatch(id, "click", &Value::Null, window, cx)
+                                view.dispatch(id, "click", &Value::Null, window, cx);
+                                if std::mem::take(&mut view.stop) {
+                                    cx.stop_propagation();
+                                }
                             },
                         )),
                         "key_down" => element.on_key_down(cx.listener(
@@ -354,7 +381,10 @@ impl PluginView {
                                     "shift": modifiers.shift,
                                     "platform": modifiers.platform,
                                 });
-                                view.dispatch(id, "key_down", &payload, window, cx)
+                                view.dispatch(id, "key_down", &payload, window, cx);
+                                if std::mem::take(&mut view.stop) {
+                                    cx.stop_propagation();
+                                }
                             },
                         )),
                         _ => element,
