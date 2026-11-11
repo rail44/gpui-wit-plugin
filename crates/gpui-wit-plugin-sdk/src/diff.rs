@@ -246,6 +246,9 @@ impl Differ {
         if let Some(focus) = element.focus {
             focus.0.set(id);
         }
+        if let Some(scroll) = element.scroll {
+            scroll.0.set(id);
+        }
         let olds = std::mem::take(&mut old.children);
         old.children = self.place_children(id, olds, element.children);
         old

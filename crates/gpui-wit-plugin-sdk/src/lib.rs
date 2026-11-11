@@ -122,7 +122,7 @@ impl<V: 'static> Cx<V> {
 /// Where keyboard focus can be, as GPUI's `FocusHandle`: an element takes it
 /// with `track_focus`, and `focus` moves focus there.
 #[derive(Clone, Default)]
-pub struct FocusHandle(Rc<Cell<u64>>);
+pub struct FocusHandle(pub(crate) Rc<Cell<u64>>);
 
 impl FocusHandle {
     pub fn new() -> Self {
@@ -130,7 +130,38 @@ impl FocusHandle {
     }
 
     pub fn focus(&self) {
-        FOCUS.with(|focus| *focus.borrow_mut() = Some(self.clone()));
+        let node = self.0.clone();
+        AFTER
+            .with(|after| (after.borrow_mut()).push(Box::new(move || Mutation::Focus(node.get()))));
+    }
+}
+
+/// An element's scroll position, as GPUI's `ScrollHandle`: an element takes
+/// it with `track_scroll`.
+#[derive(Clone, Default)]
+pub struct ScrollHandle(pub(crate) Rc<Cell<u64>>);
+
+impl ScrollHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Scrolls down by `pixels` plus `pages` times the element's height.
+    pub fn scroll_by(&self, pixels: f32, pages: f32) {
+        let node = self.0.clone();
+        AFTER.with(|after| {
+            (after.borrow_mut()).push(Box::new(move || {
+                Mutation::ScrollBy((node.get(), pixels, pages))
+            }))
+        });
+    }
+
+    /// Scrolls to `pixels` from the top of the element's content.
+    pub fn scroll_to(&self, pixels: f32) {
+        let node = self.0.clone();
+        AFTER.with(|after| {
+            (after.borrow_mut()).push(Box::new(move || Mutation::ScrollTo((node.get(), pixels))))
+        });
     }
 }
 
@@ -141,7 +172,9 @@ thread_local! {
     static DIRTY: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
     /// What views emitted, not yet handed to subscribers.
     static EMITTED: RefCell<Vec<(u32, Box<dyn Any>)>> = const { RefCell::new(Vec::new()) };
-    static FOCUS: RefCell<Option<FocusHandle>> = const { RefCell::new(None) };
+    /// What handles were asked to do, to send once the renders that give
+    /// them their nodes are done.
+    static AFTER: RefCell<Vec<Box<dyn FnOnce() -> Mutation>>> = const { RefCell::new(Vec::new()) };
     static DIFFER: RefCell<Differ> = RefCell::new(Differ::default());
     static ROOT: RefCell<Option<Rc<dyn AnyView>>> = const { RefCell::new(None) };
 }
@@ -335,11 +368,19 @@ fn flush(differ: &mut Differ) -> Vec<Mutation> {
         }
     }
     let mut batch = differ.take();
-    if let Some(focus) = FOCUS.with(|focus| focus.borrow_mut().take())
-        && focus.0.get() != 0
-    {
-        batch.push(Mutation::Focus(focus.0.get()));
-    }
+    let after = AFTER.with(|after| std::mem::take(&mut *after.borrow_mut()));
+    // A handle no element has taken has no node to act on.
+    batch.extend(
+        after
+            .into_iter()
+            .map(|mutation| mutation())
+            .filter(|mutation| {
+                !matches!(
+                    mutation,
+                    Mutation::Focus(0) | Mutation::ScrollBy((0, ..)) | Mutation::ScrollTo((0, _))
+                )
+            }),
+    );
     batch
 }
 

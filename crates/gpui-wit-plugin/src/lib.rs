@@ -14,15 +14,19 @@
 //! interfaces it adds to [`Runtime::linker`].
 //!
 //! Plugins run on the main thread, inside the call that drew or delivered
-//! an event to them.
+//! an event to them. A function the application added to the linker sees
+//! only [`State::data`]; what it has to do with the application itself it
+//! leaves there, and the application picks it up when the view emits
+//! [`Returned`].
 
 use std::{any::Any, collections::HashMap, path::Path, rc::Rc};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, Empty, Fill, FocusHandle, Hsla,
-    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window, div,
+    AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle, Hsla,
+    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window, div,
+    point, px,
 };
 use serde_json::{Value, json};
 use wasmtime::{
@@ -137,7 +141,16 @@ struct Node {
     children: Vec<u64>,
     events: Vec<String>,
     focus: Option<FocusHandle>,
+    scroll: Option<ScrollHandle>,
 }
+
+/// Emitted each time a call into the plugin has returned: whatever the
+/// plugin's calls to the application's functions left in [`State::data`] is
+/// there to pick up. The first call, made by [`PluginView::new`], returns
+/// before anything can subscribe: look once after making the view.
+pub struct Returned;
+
+impl EventEmitter<Returned> for PluginView {}
 
 /// One plugin instance and the tree it has described so far.
 pub struct PluginView {
@@ -205,6 +218,7 @@ impl PluginView {
             Ok(batch) => self.apply(batch, window, cx),
             Err(error) => self.error = Some(format!("{error:#}").into()),
         }
+        cx.emit(Returned);
         cx.notify();
     }
 
@@ -233,6 +247,7 @@ impl PluginView {
                     children: Vec::new(),
                     events: Vec::new(),
                     focus: None,
+                    scroll: None,
                 };
                 self.nodes.insert(id, node);
                 return Ok(());
@@ -263,6 +278,8 @@ impl PluginView {
             | Mutation::SetProps((id, _))
             | Mutation::SetChildren((id, _))
             | Mutation::Listen((id, _))
+            | Mutation::ScrollBy((id, ..))
+            | Mutation::ScrollTo((id, _))
             | Mutation::Focus(id) => (id, mutation),
         };
         let node = self.nodes.get_mut(&id).ok_or_else(|| {
@@ -283,6 +300,17 @@ impl PluginView {
             Mutation::Focus(_) => {
                 let handle = node.focus.get_or_insert_with(|| cx.focus_handle()).clone();
                 window.focus(&handle, cx);
+            }
+            Mutation::ScrollBy((_, pixels, pages)) => {
+                let handle = node.scroll.get_or_insert_default();
+                let down = px(pixels) + handle.bounds().size.height * pages;
+                // Offsets grow negative as the content moves up.
+                let top = (handle.offset().y - down).clamp(-handle.max_offset().y, px(0.));
+                handle.set_offset(point(handle.offset().x, top));
+            }
+            Mutation::ScrollTo((_, pixels)) => {
+                let handle = node.scroll.get_or_insert_default();
+                handle.set_offset(point(handle.offset().x, px(-pixels)));
             }
             _ => unreachable!(),
         }
@@ -305,6 +333,9 @@ impl PluginView {
                 *element.style() = node.style.clone();
                 if let Some(focus) = &node.focus {
                     element = element.track_focus(focus);
+                }
+                if let Some(scroll) = &node.scroll {
+                    element = element.track_scroll(scroll);
                 }
                 for event in &node.events {
                     element = match event.as_str() {

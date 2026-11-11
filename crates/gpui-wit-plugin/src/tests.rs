@@ -144,6 +144,22 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     let live = view.update(cx, |view, _| view.nodes.len());
     assert_eq!(live, 1 + 2 + 1 + 3 * 5, "disposed nodes are forgotten");
 
+    // Something the application tells the plugin, and its word that the
+    // call has returned.
+    let returned = Rc::new(std::cell::Cell::new(0));
+    let count = returned.clone();
+    let _subscription = cx.update(|_, cx| {
+        cx.subscribe(&view, move |_, _: &super::Returned, _| {
+            count.set(count.get() + 1)
+        })
+    });
+    view.update_in(cx, |view, window, cx| {
+        view.dispatch(0, "add", &Value::from("told"), window, cx);
+    });
+    assert_eq!(texts(&outline(&view, cx)).last().unwrap(), "remove");
+    assert!(texts(&outline(&view, cx)).contains(&"[ ] told".to_owned()));
+    assert_eq!(returned.get(), 1);
+
     // An event of a registered component, from a real click on it.
     let badge = cx.debug_bounds("badge").expect("the badge");
     cx.simulate_click(badge.center(), Modifiers::none());

@@ -33,6 +33,11 @@ interface tree {
         set-root(node-id),
         /// Moves keyboard focus to the node.
         focus(node-id),
+        /// Scrolls the node's content down by pixels plus a number of times
+        /// the node's own height (up when negative).
+        scroll-by(tuple<node-id, f32, f32>),
+        /// Scrolls the node's content to this many pixels from its top.
+        scroll-to(tuple<node-id, f32>),
     }
 }
 

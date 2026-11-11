@@ -88,6 +88,13 @@ impl Todo {
 }
 
 impl Render for Todo {
+    fn host_event(&mut self, name: &str, payload: &Value, cx: &mut Cx<Self>) {
+        if name == "add" {
+            self.add(payload.as_str().unwrap_or_default().to_owned(), cx);
+            cx.notify();
+        }
+    }
+
     fn render(&mut self, cx: &mut Cx<Self>) -> Element {
         let left = (self.rows.iter())
             .filter(|row| row.read(|row| !row.done))

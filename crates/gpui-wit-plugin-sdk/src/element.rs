@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use serde_json::{Map, Value};
 
-use crate::{AnyView, FocusHandle, Listener, Name};
+use crate::{AnyView, FocusHandle, Listener, Name, ScrollHandle};
 
 pub(crate) enum Kind {
     Div,
@@ -22,6 +22,7 @@ pub struct Element {
     pub(crate) props: Value,
     pub(crate) listeners: Vec<(&'static str, u32)>,
     pub(crate) focus: Option<FocusHandle>,
+    pub(crate) scroll: Option<ScrollHandle>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -33,6 +34,7 @@ fn element(kind: Kind) -> Element {
         props: Value::Null,
         listeners: Vec::new(),
         focus: None,
+        scroll: None,
         children: Vec::new(),
     }
 }
@@ -132,6 +134,11 @@ impl Element {
 
     pub fn track_focus(mut self, focus: &FocusHandle) -> Self {
         self.focus = Some(focus.clone());
+        self
+    }
+
+    pub fn track_scroll(mut self, scroll: &ScrollHandle) -> Self {
+        self.scroll = Some(scroll.clone());
         self
     }
 
