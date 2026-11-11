@@ -51,13 +51,25 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     std::fs::write(data.join("todos.txt"), "write\nreview\n").unwrap();
 
     let mut runtime = Runtime::new().unwrap();
-    runtime.register("badge", |props, _, _| {
+    // The badge counts its own presses in state GPUI keeps for its node,
+    // as a component with state of its own (an input, say) would.
+    let presses = Rc::new(std::cell::Cell::new(0));
+    let counted = presses.clone();
+    runtime.register("badge", move |props, window, cx| {
         let emit = props.emit.clone();
         let label = props.props["label"].as_str().unwrap_or_default().to_owned();
+        let count = window.use_keyed_state(props.id.clone(), cx, |_, _| 0u32);
+        let counted = counted.clone();
         div()
             .id(props.id)
             .debug_selector(|| "badge".into())
-            .on_click(move |_, _, cx| emit.emit("pressed", Value::Null, cx))
+            .on_click(move |_, _, cx| {
+                counted.set(count.update(cx, |count, _| {
+                    *count += 1;
+                    *count
+                }));
+                emit.emit("pressed", Value::Null, cx)
+            })
             .child(SharedString::from(label))
             .into_any_element()
     });
@@ -194,6 +206,11 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
         texts(&outline(&view, cx)),
         ["add", r#"<badge {"label":"0 left, 1 pressed"}>"#]
     );
+
+    // The component's own state outlives the plugin rendering again.
+    let badge = cx.debug_bounds("badge").expect("the badge");
+    cx.simulate_click(badge.center(), Modifiers::none());
+    assert_eq!(presses.get(), 2);
 }
 
 /// A plugin that traps is drawn as what it failed with, and is left alone.
