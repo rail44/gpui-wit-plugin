@@ -1776,6 +1776,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui-pre",
+ "gpui-wit-plugin-sdk",
  "serde_json",
  "wasmtime",
  "wasmtime-wasi",

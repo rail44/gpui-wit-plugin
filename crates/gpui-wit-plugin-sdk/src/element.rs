@@ -19,6 +19,9 @@ pub struct Element {
     pub(crate) kind: Kind,
     pub(crate) text: String,
     pub(crate) style: Map<String, Value>,
+    pub(crate) hover: Map<String, Value>,
+    pub(crate) group: Option<Name>,
+    pub(crate) group_hover: Option<(Name, Map<String, Value>)>,
     pub(crate) props: Value,
     pub(crate) listeners: Vec<(&'static str, u32)>,
     pub(crate) focus: Option<FocusHandle>,
@@ -31,6 +34,9 @@ fn element(kind: Kind) -> Element {
         kind,
         text: String::new(),
         style: Map::new(),
+        hover: Map::new(),
+        group: None,
+        group_hover: None,
         props: Value::Null,
         listeners: Vec::new(),
         focus: None,
@@ -132,6 +138,46 @@ impl Element {
         self.on("key_down", listener)
     }
 
+    /// The left button pressed over the element. The payload has the
+    /// pointer's `x` and `y` in the window.
+    pub fn on_mouse_down(self, listener: Listener) -> Self {
+        self.on("mouse_down", listener)
+    }
+
+    /// The pointer arriving over the element (`true`) or leaving it.
+    pub fn on_hover(self, listener: Listener) -> Self {
+        self.on("hover", listener)
+    }
+
+    /// What the pointer over the element adds to its style:
+    /// `.hover(|style| style.bg("#eeeeee"))`.
+    pub fn hover(mut self, style: impl FnOnce(Element) -> Element) -> Self {
+        self.hover = style(div()).style;
+        self
+    }
+
+    /// Names the element as a group for `group_hover`.
+    pub fn group(mut self, name: impl Into<Name>) -> Self {
+        self.group = Some(name.into());
+        self
+    }
+
+    /// What the pointer over the group `name` adds to the element's style.
+    pub fn group_hover(
+        mut self,
+        name: impl Into<Name>,
+        style: impl FnOnce(Element) -> Element,
+    ) -> Self {
+        self.group_hover = Some((name.into(), style(div()).style));
+        self
+    }
+
+    /// The element's style as it crosses to the host.
+    #[doc(hidden)]
+    pub fn style_json(&self) -> String {
+        serde_json::to_string(&self.style).unwrap_or_default()
+    }
+
     pub fn track_focus(mut self, focus: &FocusHandle) -> Self {
         self.focus = Some(focus.clone());
         self
@@ -190,12 +236,146 @@ impl Element {
         self.style(&["flex_wrap"], "Wrap")
     }
 
+    pub fn items_start(self) -> Self {
+        self.style(&["align_items"], "FlexStart")
+    }
+
     pub fn items_center(self) -> Self {
         self.style(&["align_items"], "Center")
     }
 
+    pub fn items_end(self) -> Self {
+        self.style(&["align_items"], "FlexEnd")
+    }
+
+    pub fn justify_start(self) -> Self {
+        self.style(&["justify_content"], "FlexStart")
+    }
+
+    pub fn justify_center(self) -> Self {
+        self.style(&["justify_content"], "Center")
+    }
+
+    pub fn justify_end(self) -> Self {
+        self.style(&["justify_content"], "FlexEnd")
+    }
+
     pub fn justify_between(self) -> Self {
         self.style(&["justify_content"], "SpaceBetween")
+    }
+
+    /// Placed by `top`/`right`/`bottom`/`left` from where it would be.
+    pub fn relative(self) -> Self {
+        self.style(&["position"], "Relative")
+    }
+
+    /// Placed by `top`/`right`/`bottom`/`left` in its positioned parent,
+    /// out of the flow.
+    pub fn absolute(self) -> Self {
+        self.style(&["position"], "Absolute")
+    }
+
+    pub fn top(self, length: impl Into<Length>) -> Self {
+        self.each("inset", &["top"], length.into())
+    }
+
+    pub fn right(self, length: impl Into<Length>) -> Self {
+        self.each("inset", &["right"], length.into())
+    }
+
+    pub fn bottom(self, length: impl Into<Length>) -> Self {
+        self.each("inset", &["bottom"], length.into())
+    }
+
+    pub fn left(self, length: impl Into<Length>) -> Self {
+        self.each("inset", &["left"], length.into())
+    }
+
+    pub fn m(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &EDGES, length.into())
+    }
+
+    pub fn mx(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["left", "right"], length.into())
+    }
+
+    pub fn my(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["top", "bottom"], length.into())
+    }
+
+    pub fn mt(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["top"], length.into())
+    }
+
+    pub fn mb(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["bottom"], length.into())
+    }
+
+    pub fn ml(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["left"], length.into())
+    }
+
+    pub fn mr(self, length: impl Into<Length>) -> Self {
+        self.each("margin", &["right"], length.into())
+    }
+
+    pub fn max_w(self, length: impl Into<Length>) -> Self {
+        self.style(&["max_size", "width"], length.into().0)
+    }
+
+    pub fn max_h(self, length: impl Into<Length>) -> Self {
+        self.style(&["max_size", "height"], length.into().0)
+    }
+
+    pub fn pl(self, length: impl Into<Length>) -> Self {
+        self.each("padding", &["left"], length.into())
+    }
+
+    pub fn pr(self, length: impl Into<Length>) -> Self {
+        self.each("padding", &["right"], length.into())
+    }
+
+    pub fn border_t(self, length: impl Into<Length>) -> Self {
+        self.each("border_widths", &["top"], length.into())
+    }
+
+    pub fn border_b(self, length: impl Into<Length>) -> Self {
+        self.each("border_widths", &["bottom"], length.into())
+    }
+
+    pub fn border_l(self, length: impl Into<Length>) -> Self {
+        self.each("border_widths", &["left"], length.into())
+    }
+
+    pub fn border_r(self, length: impl Into<Length>) -> Self {
+        self.each("border_widths", &["right"], length.into())
+    }
+
+    /// From 0 (invisible) to 1.
+    pub fn opacity(self, opacity: f32) -> Self {
+        self.style(&["opacity"], opacity)
+    }
+
+    pub fn whitespace_nowrap(self) -> Self {
+        self.style(&["text", "white_space"], "Nowrap")
+    }
+
+    /// Ends text that does not fit with an ellipsis.
+    pub fn text_ellipsis(self) -> Self {
+        self.style(
+            &["text", "text_overflow"],
+            serde_json::json!({ "Truncate": "…" }),
+        )
+    }
+
+    /// One line, ended with an ellipsis where it does not fit.
+    pub fn truncate(self) -> Self {
+        self.overflow_hidden().whitespace_nowrap().text_ellipsis()
+    }
+
+    /// At most `lines` lines of text.
+    pub fn line_clamp(self, lines: u32) -> Self {
+        self.style(&["text", "line_clamp"], lines).overflow_hidden()
     }
 
     pub fn w(self, length: impl Into<Length>) -> Self {

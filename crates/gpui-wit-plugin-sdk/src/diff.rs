@@ -26,6 +26,9 @@ pub(crate) struct Retained {
     is_text: bool,
     text: String,
     style: Map<String, Value>,
+    hover: Map<String, Value>,
+    group: Option<Name>,
+    group_hover: Option<(Name, Map<String, Value>)>,
     props: Value,
     listeners: Listeners,
     children: Vec<Kept>,
@@ -199,6 +202,9 @@ impl Differ {
             is_text,
             text: String::new(),
             style: Map::new(),
+            hover: Map::new(),
+            group: None,
+            group_hover: None,
             props: Value::Null,
             listeners: Vec::new(),
             children: Vec::new(),
@@ -218,6 +224,28 @@ impl Differ {
             let style = serde_json::to_string(&element.style).unwrap_or_default();
             self.batch.push(Mutation::SetStyle((id, style)));
             old.style = element.style;
+        }
+        if old.hover != element.hover {
+            let style = serde_json::to_string(&element.hover).unwrap_or_default();
+            self.batch.push(Mutation::SetHoverStyle((id, style)));
+            old.hover = element.hover;
+        }
+        if old.group != element.group {
+            let group = element.group.as_deref().unwrap_or_default().to_owned();
+            self.batch.push(Mutation::SetGroup((id, group)));
+            old.group = element.group;
+        }
+        if old.group_hover != element.group_hover {
+            let (group, style) = match &element.group_hover {
+                Some((group, style)) => (
+                    group.to_string(),
+                    serde_json::to_string(style).unwrap_or_default(),
+                ),
+                None => (String::new(), String::new()),
+            };
+            self.batch
+                .push(Mutation::SetGroupHoverStyle((id, group, style)));
+            old.group_hover = element.group_hover;
         }
         if old.props != element.props {
             self.batch

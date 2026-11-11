@@ -24,9 +24,9 @@ use std::{any::Any, collections::HashMap, path::Path, rc::Rc};
 use anyhow::Result;
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle,
-    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Overflow, ParentElement,
-    Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
-    WeakEntity, Window, div, point, px,
+    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    Overflow, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Styled, WeakEntity, Window, div, point, px,
 };
 use serde_json::{Value, json};
 use wasmtime::{
@@ -159,6 +159,9 @@ pub struct Instance {
 struct Node {
     kind: Kind,
     style: StyleRefinement,
+    hover: Option<StyleRefinement>,
+    group: Option<SharedString>,
+    group_hover: Option<(SharedString, StyleRefinement)>,
     text: SharedString,
     props: Value,
     children: Vec<u64>,
@@ -288,6 +291,15 @@ impl PluginView {
         cx.notify();
     }
 
+    /// Hands the plugin an event of one of its elements, and keeps the
+    /// event from the elements further out if the plugin asked.
+    fn report(&mut self, id: u64, name: &str, payload: Value, cx: &mut Context<Self>) {
+        self.dispatch(id, name, &payload, cx);
+        if std::mem::take(&mut self.stop) {
+            cx.stop_propagation();
+        }
+    }
+
     fn apply(&mut self, batch: Vec<Mutation>, cx: &mut Context<Self>) {
         for mutation in batch {
             if let Err(error) = self.apply_one(mutation, cx) {
@@ -303,6 +315,9 @@ impl PluginView {
                 let node = Node {
                     kind,
                     style: StyleRefinement::default(),
+                    hover: None,
+                    group: None,
+                    group_hover: None,
                     text: SharedString::default(),
                     props: Value::Null,
                     children: Vec::new(),
@@ -344,6 +359,9 @@ impl PluginView {
                 return Ok(());
             }
             Mutation::SetStyle((id, _))
+            | Mutation::SetHoverStyle((id, _))
+            | Mutation::SetGroup((id, _))
+            | Mutation::SetGroupHoverStyle((id, ..))
             | Mutation::SetText((id, _))
             | Mutation::SetProps((id, _))
             | Mutation::SetChildren((id, _))
@@ -373,6 +391,16 @@ impl PluginView {
                 if [overflow.x, overflow.y].contains(&Some(Overflow::Scroll)) {
                     node.scroll.get_or_insert_default();
                 }
+            }
+            Mutation::SetHoverStyle((_, style)) => node.hover = Some(parse_style(&style)?),
+            Mutation::SetGroup((_, group)) => {
+                node.group = (!group.is_empty()).then(|| group.into());
+            }
+            Mutation::SetGroupHoverStyle((_, group, style)) => {
+                node.group_hover = match group.is_empty() {
+                    true => None,
+                    false => Some((group.into(), parse_style(&style)?)),
+                };
             }
             Mutation::SetText((_, text)) => node.text = text.into(),
             Mutation::SetProps((_, props)) => node.props = serde_json::from_str(&props)?,
@@ -429,14 +457,33 @@ impl PluginView {
                 if let Some(scroll) = &node.scroll {
                     element = element.track_scroll(scroll);
                 }
+                if let Some(hover) = &node.hover {
+                    element = element.hover(|_| hover.clone());
+                }
+                if let Some(group) = &node.group {
+                    element = element.group(group.clone());
+                }
+                if let Some((group, style)) = &node.group_hover {
+                    element = element.group_hover(group.clone(), |_| style.clone());
+                }
                 for event in &node.events {
                     element = match event.as_str() {
                         "click" => {
                             element.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                                view.dispatch(id, "click", &Value::Null, cx);
-                                if std::mem::take(&mut view.stop) {
-                                    cx.stop_propagation();
-                                }
+                                view.report(id, "click", Value::Null, cx)
+                            }))
+                        }
+                        "mouse_down" => element.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |view, event: &MouseDownEvent, _, cx| {
+                                let at = event.position;
+                                let payload = json!({ "x": f32::from(at.x), "y": f32::from(at.y) });
+                                view.report(id, "mouse_down", payload, cx)
+                            }),
+                        ),
+                        "hover" => {
+                            element.on_hover(cx.listener(move |view, over: &bool, _, cx| {
+                                view.report(id, "hover", json!(over), cx)
                             }))
                         }
                         "key_down" => element.on_key_down(cx.listener(
@@ -449,10 +496,7 @@ impl PluginView {
                                     "shift": modifiers.shift,
                                     "platform": modifiers.platform,
                                 });
-                                view.dispatch(id, "key_down", &payload, cx);
-                                if std::mem::take(&mut view.stop) {
-                                    cx.stop_propagation();
-                                }
+                                view.report(id, "key_down", payload, cx)
                             },
                         )),
                         _ => element,

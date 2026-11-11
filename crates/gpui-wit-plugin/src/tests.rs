@@ -109,10 +109,30 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     };
     assert_eq!(ids(&first), ids(&toggled));
 
-    // A real click on the first element, and a key while focused.
+    // The pointer over the first element, and away again.
+    cx.simulate_mouse_move(point(px(12.), px(12.)), None, Modifiers::none());
+    assert_eq!(texts(&outline(&view, cx))[0], "add (hovering)");
+    cx.simulate_mouse_move(point(px(500.), px(500.)), None, Modifiers::none());
+    assert_eq!(texts(&outline(&view, cx))[0], "add");
+
+    // What the pointer over a row adds to its parts' styles.
+    view.update(cx, |view, _| {
+        let hovered = |id: &str| view.nodes[&id.parse().unwrap()].parent.unwrap();
+        let mark = &view.nodes[&hovered(&ids(&first)[2])];
+        assert!(mark.hover.as_ref().unwrap().background.is_some());
+        let remove = &view.nodes[&hovered(&ids(&first)[3])];
+        let (group, style) = remove.group_hover.as_ref().unwrap();
+        assert_eq!((group.as_ref(), style.opacity), ("row", Some(1.)));
+        let row = &view.nodes[&mark.parent.unwrap()];
+        assert_eq!(row.group.as_deref(), Some("row"));
+    });
+
+    // A real click on the first element, which presses it too, and a key
+    // while focused.
     cx.simulate_click(point(px(12.), px(12.)), Modifiers::none());
     cx.simulate_keystrokes("a");
     let added = outline(&view, cx);
+    assert_eq!(texts(&added)[1], r#"<badge {"label":"3 left, 1 pressed"}>"#);
     assert_eq!(
         texts(&added)[6..],
         ["[ ] item 3", "remove", "[ ] item 4", "remove"]
@@ -169,9 +189,10 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     // An event of a registered component, from a real click on it.
     let badge = cx.debug_bounds("badge").expect("the badge");
     cx.simulate_click(badge.center(), Modifiers::none());
+    cx.simulate_mouse_move(point(px(500.), px(500.)), None, Modifiers::none());
     assert_eq!(
         texts(&outline(&view, cx)),
-        ["add", r#"<badge {"label":"0 left"}>"#]
+        ["add", r#"<badge {"label":"0 left, 1 pressed"}>"#]
     );
 }
 
@@ -400,4 +421,80 @@ impl gpui::Render for NativeHolder {
     fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
         self.0.clone()
     }
+}
+
+/// Every style method of the SDK writes what GPUI reads.
+#[test]
+fn the_sdk_writes_styles_gpui_reads() {
+    use gpui_wit_plugin_sdk::{div, rems};
+
+    let element = div()
+        .flex()
+        .flex_col()
+        .flex_row()
+        .flex_1()
+        .flex_none()
+        .flex_wrap()
+        .items_start()
+        .items_center()
+        .items_end()
+        .justify_start()
+        .justify_center()
+        .justify_end()
+        .justify_between()
+        .relative()
+        .absolute()
+        .top(1.)
+        .right(2.)
+        .bottom(3.)
+        .left(4.)
+        .w(10.)
+        .h(rems(2.))
+        .w_full()
+        .size_full()
+        .min_w(1.)
+        .min_h(1.)
+        .max_w(100.)
+        .max_h(100.)
+        .p(1.)
+        .px(2.)
+        .py(3.)
+        .pt(4.)
+        .pb(5.)
+        .pl(6.)
+        .pr(7.)
+        .m(1.)
+        .mx(2.)
+        .my(3.)
+        .mt(4.)
+        .mb(5.)
+        .ml("auto")
+        .mr(7.)
+        .gap(4.)
+        .border(1.)
+        .border_t(2.)
+        .border_b(2.)
+        .border_l(2.)
+        .border_r(2.)
+        .rounded(4.)
+        .bg("#102030")
+        .border_color("#10203040")
+        .text_color("#ffffff")
+        .text_size(13.)
+        .line_height(20.)
+        .font_weight(600.)
+        .opacity(0.5)
+        .overflow_hidden()
+        .overflow_y_scroll()
+        .cursor_pointer()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .truncate()
+        .line_clamp(2);
+    let style = super::parse_style(&element.style_json()).unwrap();
+    assert_eq!(style.position, Some(gpui::Position::Absolute));
+    assert_eq!(style.opacity, Some(0.5));
+    assert_eq!(style.text.line_clamp, Some(2));
+    assert_eq!(style.inset.left, Some(px(4.).into()));
+    assert!(style.background.is_some());
 }

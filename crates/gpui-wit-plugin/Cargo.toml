@@ -12,4 +12,6 @@ wasmtime = { version = "36", default-features = false, features = ["runtime", "c
 wasmtime-wasi = { version = "36", default-features = false }
 
 [dev-dependencies]
+# For the test that holds the SDK's style methods to what GPUI reads.
+gpui-wit-plugin-sdk = { path = "../gpui-wit-plugin-sdk" }
 gpui = { package = "gpui-pre", version = "0.3.11", features = ["test-support"] }

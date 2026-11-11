@@ -60,5 +60,7 @@ run natively, with no boundary to cross, takes 0.6 ms
   again, as it does for a GPUI view that is not split into cached child
   views. The plugin side already renders and sends only the views that
   changed.
-- Events are `click` and `key_down`, plus whatever a registered component
-  emits.
+- An element's events are `click`, `mouse_down`, `hover` and `key_down`;
+  anything else is an event of a registered component. There is no drag
+  and drop, no custom painting, and no list that draws only the rows in
+  view.

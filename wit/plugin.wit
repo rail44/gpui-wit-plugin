@@ -19,6 +19,14 @@ interface tree {
         create(tuple<node-id, kind>),
         /// The node's whole style: gpui's `StyleRefinement` as JSON.
         set-style(tuple<node-id, string>),
+        /// What the pointer over the node adds to its style: as `set-style`.
+        set-hover-style(tuple<node-id, string>),
+        /// Names the node as a group other nodes style themselves by
+        /// (empty: none).
+        set-group(tuple<node-id, string>),
+        /// What the pointer over the group named adds to the node's style
+        /// (an empty name: nothing).
+        set-group-hover-style(tuple<node-id, string, string>),
         set-text(tuple<node-id, string>),
         /// A component's properties, as JSON.
         set-props(tuple<node-id, string>),

@@ -25,10 +25,12 @@ impl Render for Row {
         div()
             .flex_row()
             .gap(8.)
+            .group("row")
             .child(
                 div()
                     .flex_1()
                     .cursor_pointer()
+                    .hover(|style| style.bg("#f0f0f0"))
                     .on_click(cx.listener(|this, _, cx| {
                         this.done = !this.done;
                         cx.emit(RowEvent::Toggled);
@@ -39,6 +41,8 @@ impl Render for Row {
             .child(
                 div()
                     .cursor_pointer()
+                    .opacity(0.4)
+                    .group_hover("row", |style| style.opacity(1.))
                     .on_click(cx.listener(|this, _, cx| cx.emit(RowEvent::Removed(this.id))))
                     .child("remove"),
             )
@@ -50,6 +54,9 @@ struct Todo {
     next: u32,
     focus: FocusHandle,
     scroll: ScrollHandle,
+    /// Whether the pointer is over "add", and how often it was pressed.
+    hovering: bool,
+    presses: u32,
 }
 
 impl Todo {
@@ -59,6 +66,8 @@ impl Todo {
             next: 0,
             focus: FocusHandle::new(),
             scroll: ScrollHandle::new(),
+            hovering: false,
+            presses: 0,
         };
         let initial = std::env::var("TODO_FILE")
             .ok()
@@ -103,6 +112,10 @@ impl Render for Todo {
         let left = (self.rows.iter())
             .filter(|row| row.read(|row| !row.done))
             .count();
+        let label = match self.presses {
+            0 => format!("{left} left"),
+            presses => format!("{left} left, {presses} pressed"),
+        };
         div()
             .flex_col()
             .size_full()
@@ -128,17 +141,27 @@ impl Render for Todo {
                         this.add(format!("item {}", this.next + 1), cx);
                         cx.notify();
                     }))
-                    .child("add"),
-            )
-            .child(
-                component("badge", json!({ "label": format!("{left} left") })).on(
-                    "pressed",
-                    cx.listener(|this, _, cx| {
-                        this.rows.clear();
+                    .on_mouse_down(cx.listener(|this, _, cx| {
+                        this.presses += 1;
                         cx.notify();
+                    }))
+                    .on_hover(cx.listener(|this, over, cx| {
+                        this.hovering = over == true;
+                        cx.notify();
+                    }))
+                    .child(if self.hovering {
+                        "add (hovering)"
+                    } else {
+                        "add"
                     }),
-                ),
             )
+            .child(component("badge", json!({ "label": label })).on(
+                "pressed",
+                cx.listener(|this, _, cx| {
+                    this.rows.clear();
+                    cx.notify();
+                }),
+            ))
             .children(self.rows.iter())
     }
 }
