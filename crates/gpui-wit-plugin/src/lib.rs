@@ -10,7 +10,7 @@
 //! ([`Runtime::register`]).
 //!
 //! The application decides what else a plugin reaches: the WASI context it
-//! hands [`PluginView::new`] (preopened directories, environment) and the
+//! hands [`Runtime::instantiate`] (preopened directories, environment) and the
 //! interfaces it adds to [`Runtime::linker`].
 //!
 //! Plugins run on the main thread, inside the call that drew or delivered
@@ -131,6 +131,31 @@ impl Runtime {
     pub fn load(&self, path: impl AsRef<Path>) -> Result<Component> {
         Component::from_file(&self.engine, path)
     }
+
+    /// Instantiates `component` without running it: `wasi` is what it sees
+    /// of the machine, `data` what the application's own functions find in
+    /// [`State::data`].
+    pub fn instantiate(
+        &self,
+        component: &Component,
+        wasi: WasiCtx,
+        data: Box<dyn Any + Send>,
+    ) -> Result<Instance> {
+        let state = State {
+            wasi,
+            table: ResourceTable::new(),
+            data,
+        };
+        let mut store = Store::new(&self.engine, state);
+        let plugin = Plugin::instantiate(&mut store, component, &self.linker)?;
+        Ok(Instance { store, plugin })
+    }
+}
+
+/// A plugin that is loaded and has not run yet.
+pub struct Instance {
+    store: Store<State>,
+    plugin: Plugin,
 }
 
 struct Node {
@@ -175,22 +200,16 @@ impl Focusable for PluginView {
 }
 
 impl PluginView {
+    /// Runs the plugin's `init` and keeps what it described. A plugin that
+    /// fails, here or later, is drawn as the error it failed with.
     pub fn new(
         runtime: &Rc<Runtime>,
-        component: &Component,
-        wasi: WasiCtx,
-        data: Box<dyn Any + Send>,
+        instance: Instance,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<Self> {
-        let state = State {
-            wasi,
-            table: ResourceTable::new(),
-            data,
-        };
-        let mut store = Store::new(&runtime.engine, state);
-        let plugin = Plugin::instantiate(&mut store, component, &runtime.linker)?;
-        let batch = plugin.call_init(&mut store)?;
+    ) -> Self {
+        let Instance { mut store, plugin } = instance;
+        let init = plugin.call_init(&mut store);
         let mut view = Self {
             runtime: runtime.clone(),
             store,
@@ -201,8 +220,11 @@ impl PluginView {
             stop: false,
             error: None,
         };
-        view.apply(batch, window, cx);
-        Ok(view)
+        match init {
+            Ok(batch) => view.apply(batch, window, cx),
+            Err(error) => view.error = Some(format!("{error:#}").into()),
+        }
+        view
     }
 
     /// The plugin's store state, where [`State::data`] is.

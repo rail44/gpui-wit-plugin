@@ -80,9 +80,10 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
         .preopened_dir(&data, "/data", DirPerms::READ, FilePerms::READ)
         .unwrap();
 
-    let window = cx.add_window(|window, cx| {
-        PluginView::new(&runtime, &component, wasi.build(), Box::new(()), window, cx).unwrap()
-    });
+    let instance = runtime
+        .instantiate(&component, wasi.build(), Box::new(()))
+        .unwrap();
+    let window = cx.add_window(|window, cx| PluginView::new(&runtime, instance, window, cx));
     let view = window.root(cx).unwrap();
     let cx = &mut VisualTestContext::from_window(*window.deref(), cx);
     cx.run_until_parked();
