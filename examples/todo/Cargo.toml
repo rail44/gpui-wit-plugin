@@ -1,0 +1,21 @@
+[package]
+name = "todo"
+description = "A to-do list as a gpui-wit-plugin plugin."
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Built for `wasm32-wasip2` on its own:
+#   cargo build --release --target wasm32-wasip2
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gpui-wit-plugin-sdk = { path = "../../crates/gpui-wit-plugin-sdk" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

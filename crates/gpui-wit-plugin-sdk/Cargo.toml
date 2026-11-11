@@ -1,0 +1,9 @@
+[package]
+name = "gpui-wit-plugin-sdk"
+description = "Writes gpui-wit-plugin plugins the way GPUI views are written."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+wit-bindgen = "0.63"

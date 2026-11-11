@@ -1,0 +1,15 @@
+[package]
+name = "gpui-wit-plugin"
+description = "Draws views that WASI preview 2 components describe, with GPUI."
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gpui = { package = "gpui-pre", version = "0.3.11" }
+serde_json.workspace = true
+wasmtime = { version = "36", default-features = false, features = ["runtime", "cranelift", "std", "component-model"] }
+wasmtime-wasi = { version = "36", default-features = false }
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "0.3.11", features = ["test-support"] }

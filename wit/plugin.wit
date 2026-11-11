@@ -1,0 +1,48 @@
+package gpui-wit:plugin@0.1.0;
+
+/// What a plugin tells its host to draw: a tree of nodes the plugin numbers
+/// itself, changed by the operations it returns from each call.
+interface tree {
+    /// A node's number, chosen by the plugin and never reused.
+    type node-id = u64;
+
+    variant kind {
+        /// A `div`.
+        element,
+        /// A run of text.
+        text,
+        /// Something the host registered under this name.
+        component(string),
+    }
+
+    variant mutation {
+        create(tuple<node-id, kind>),
+        /// The node's whole style: gpui's `StyleRefinement` as JSON.
+        set-style(tuple<node-id, string>),
+        set-text(tuple<node-id, string>),
+        /// A component's properties, as JSON.
+        set-props(tuple<node-id, string>),
+        /// The node's children, in order.
+        set-children(tuple<node-id, list<node-id>>),
+        /// The events the node reports, replacing those it reported before.
+        listen(tuple<node-id, list<string>>),
+        /// Puts the second node wherever the first one is.
+        replace(tuple<node-id, node-id>),
+        /// Forgets one node (not its children).
+        dispose(node-id),
+        set-root(node-id),
+        /// Moves keyboard focus to the node.
+        focus(node-id),
+    }
+}
+
+world plugin {
+    use tree.{node-id, mutation};
+
+    /// Called once, before anything is drawn.
+    export init: func() -> list<mutation>;
+
+    /// Something happened on `target` (0: the view as a whole). `payload`
+    /// is JSON.
+    export event: func(target: node-id, name: string, payload: string) -> list<mutation>;
+}
