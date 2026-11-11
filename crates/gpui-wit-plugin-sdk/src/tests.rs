@@ -149,6 +149,34 @@ fn a_view_taken_out_is_disposed_and_the_rest_stay() {
     assert_eq!(disposed(&batch), 2, "the row and its text");
 }
 
+struct Hears(Vec<Entity<Row>>);
+
+impl Render for Hears {
+    fn host_event(&mut self, _: &str, _: &Value, cx: &mut Cx<Self>) {
+        // Replaces its only row, hearing the new one.
+        let row = cx.new(|_| Row("row"));
+        cx.subscribe(&row, |_, _: &(), _| {});
+        self.0 = vec![row];
+        cx.notify();
+    }
+
+    fn render(&mut self, _: &mut Cx<Self>) -> Element {
+        div().children(self.0.iter())
+    }
+}
+
+#[test]
+fn hearing_views_that_are_gone_does_not_pile_up() {
+    __init(|_: &mut Cx<Hears>| Hears(Vec::new()));
+    for _ in 0..10 {
+        __event(0, "replace", "null");
+    }
+    let root = crate::ROOT.with(|root| root.borrow().clone()).unwrap();
+    // The row in place, and the one it replaced, which was still placed
+    // when the newest was heard.
+    assert!(root.subscription_count() <= 2);
+}
+
 struct Styled(usize);
 
 impl Render for Styled {

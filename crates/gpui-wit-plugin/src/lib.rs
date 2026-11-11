@@ -266,6 +266,14 @@ impl PluginView {
         if self.error.is_some() {
             return;
         }
+        // An event the plugin does not listen for on that node is not worth
+        // a call into it.
+        let listened = |node: &Node| node.events.iter().any(|event| event == name);
+        if target != 0 && !self.nodes.get(&target).is_some_and(listened) {
+            return;
+        }
+        // What an earlier call asked about its own event is not this one's.
+        self.stop = false;
         let payload = payload.to_string();
         match self
             .plugin

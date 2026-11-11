@@ -113,6 +113,8 @@ impl<V: 'static> Cx<V> {
         entity: &Entity<C>,
         on_event: impl Fn(&mut V, &E, &mut Cx<V>) + 'static,
     ) {
+        // Views that are gone emit nothing more.
+        self.subscriptions.retain(|(key, _)| view(*key).is_some());
         self.subscriptions.push((
             entity.0.key,
             Rc::new(move |view, event, cx| {
@@ -279,6 +281,8 @@ pub(crate) trait AnyView {
     fn dispatch(&self, callback: u32, payload: &Value);
     fn deliver(&self, from: u32, event: &dyn Any);
     fn host_event(&self, name: &str, payload: &Value);
+    #[cfg(test)]
+    fn subscription_count(&self) -> usize;
 }
 
 impl<C: Render> AnyView for ViewCell<C> {
@@ -344,6 +348,11 @@ impl<C: Render> AnyView for ViewCell<C> {
 
     fn host_event(&self, name: &str, payload: &Value) {
         self.run(|view, cx| view.host_event(name, payload, cx));
+    }
+
+    #[cfg(test)]
+    fn subscription_count(&self) -> usize {
+        self.state.borrow().1.subscriptions.len()
     }
 }
 
