@@ -32,11 +32,33 @@ rustup target add wasm32-wasip2
 cargo test --workspace        # builds examples/todo for wasm32-wasip2 itself
 ```
 
+## What it costs
+
+`cargo test --release -p gpui-wit-plugin -- --ignored --nocapture` times
+the to-do example with 100 rows (about 500 nodes) on GPUI's test platform.
+One run on the machine this was written on, median of each:
+
+| | ms |
+|---|---|
+| The plugin's first call (reads its file, renders every row) | 1.0 |
+| Applying what that call answered | 0.6 |
+| A click on one row: the plugin's call | 0.02 |
+| Applying what that call answered | 0.001 |
+| Drawing the view again after it | 1.2 |
+| Drawing the same tree from a view written against GPUI directly | 1.2 |
+
+A change costs what it costs a GPUI view of the same size: the call across
+the boundary is small beside the draw. A first render of the same shape
+run natively, with no boundary to cross, takes 0.6 ms
+(`cargo test --release -p gpui-wit-plugin-sdk -- --ignored --nocapture`),
+0.2 ms of it building the elements, whose styles are JSON maps.
+
 ## Not there yet
 
 - Plugins run on the main thread, with no limit on how long a call takes.
 - The host draws a plugin as one GPUI view: any change draws the whole tree
-  again (the plugin side already renders and sends only the views that
-  changed).
+  again, as it does for a GPUI view that is not split into cached child
+  views. The plugin side already renders and sends only the views that
+  changed.
 - Events are `click` and `key_down`, plus whatever a registered component
   emits.

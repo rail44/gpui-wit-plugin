@@ -205,22 +205,26 @@ impl PluginView {
     pub fn new(runtime: &Rc<Runtime>, instance: Instance, cx: &mut Context<Self>) -> Self {
         let Instance { mut store, plugin } = instance;
         let init = plugin.call_init(&mut store);
-        let mut view = Self {
+        let mut view = Self::unstarted(runtime, Instance { store, plugin }, cx);
+        match init {
+            Ok(batch) => view.apply(batch, cx),
+            Err(error) => view.error = Some(format!("{error:#}").into()),
+        }
+        view
+    }
+
+    fn unstarted(runtime: &Rc<Runtime>, instance: Instance, cx: &mut Context<Self>) -> Self {
+        Self {
             runtime: runtime.clone(),
-            store,
-            plugin,
+            store: instance.store,
+            plugin: instance.plugin,
             nodes: HashMap::new(),
             root: None,
             focus: cx.focus_handle(),
             pending_focus: None,
             stop: false,
             error: None,
-        };
-        match init {
-            Ok(batch) => view.apply(batch, cx),
-            Err(error) => view.error = Some(format!("{error:#}").into()),
         }
-        view
     }
 
     /// What the plugin has described, for a test or a log to read: each

@@ -215,7 +215,7 @@ impl Differ {
             old.text = element.text;
         }
         if old.style != element.style {
-            let style = Value::Object(element.style.clone()).to_string();
+            let style = serde_json::to_string(&element.style).unwrap_or_default();
             self.batch.push(Mutation::SetStyle((id, style)));
             old.style = element.style;
         }

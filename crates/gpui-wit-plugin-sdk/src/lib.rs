@@ -440,3 +440,6 @@ macro_rules! export_view {
 }
 
 pub(crate) type Name = Cow<'static, str>;
+
+#[cfg(test)]
+mod tests;
