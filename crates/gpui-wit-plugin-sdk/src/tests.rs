@@ -1,7 +1,9 @@
 //! What crosses to the host, checked without one: the entry points a
 //! plugin exports are called directly and their batches read.
 
-use crate::{__event, __init, Cx, Element, Entity, Mutation, Render, Value, div, text};
+use crate::{
+    __event, __init, Cx, Element, Entity, Mutation, Render, Styled as _, Value, div, text,
+};
 
 fn count(batch: &[Mutation], matches: impl Fn(&Mutation) -> bool) -> usize {
     batch.iter().filter(|mutation| matches(mutation)).count()
@@ -177,13 +179,14 @@ fn hearing_views_that_are_gone_does_not_pile_up() {
     assert_eq!(heard, 1);
 }
 
-struct Styled(usize);
+struct StyledRow(usize);
 
-impl Render for Styled {
+impl Render for StyledRow {
     fn render(&mut self, cx: &mut Cx<Self>) -> Element {
         div()
+            .flex()
             .flex_row()
-            .gap(8.)
+            .gap_2()
             .child(
                 div()
                     .flex_1()
@@ -200,15 +203,16 @@ impl Render for Styled {
     }
 }
 
-struct Hundred(Vec<Entity<Styled>>);
+struct Hundred(Vec<Entity<StyledRow>>);
 
 impl Render for Hundred {
     fn render(&mut self, _: &mut Cx<Self>) -> Element {
         div()
+            .flex()
             .flex_col()
             .size_full()
-            .p(8.)
-            .gap(4.)
+            .p_2()
+            .gap_1()
             .children(self.0.iter())
     }
 }
@@ -222,16 +226,21 @@ fn measure_a_first_render() {
     for _ in 0..200 {
         let started = std::time::Instant::now();
         let batch = __init(|cx: &mut Cx<Hundred>| {
-            Hundred((0..100).map(|row| cx.new(|_| Styled(row))).collect())
+            Hundred((0..100).map(|row| cx.new(|_| StyledRow(row))).collect())
         });
         times.push(started.elapsed());
         assert!(batch.len() > 1000);
     }
+    println!(
+        "sizes: StyleRefinement {}, Element {}",
+        std::mem::size_of::<gpui::StyleRefinement>(),
+        std::mem::size_of::<Element>()
+    );
     times.sort();
     println!("first render: best {:?}, median {:?}", times[0], times[100]);
 
     // Building the elements alone, and serializing their styles alone.
-    let mut cx = Cx::<Styled> {
+    let mut cx = Cx::<StyledRow> {
         key: 0,
         notified: false,
         handlers: Vec::new(),
@@ -241,7 +250,7 @@ fn measure_a_first_render() {
     let mut serials = Vec::new();
     for _ in 0..200 {
         let started = std::time::Instant::now();
-        let rows: Vec<Element> = (0..100).map(|row| Styled(row).render(&mut cx)).collect();
+        let rows: Vec<Element> = (0..100).map(|row| StyledRow(row).render(&mut cx)).collect();
         builds.push(started.elapsed());
         let started = std::time::Instant::now();
         let mut bytes = 0;

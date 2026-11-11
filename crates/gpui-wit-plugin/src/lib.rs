@@ -5,7 +5,7 @@
 //! operations that change it; [`PluginView`] keeps that tree and turns it
 //! into GPUI elements when it renders. What the plugin sends is GPUI's own
 //! vocabulary wherever GPUI has one: a node's style is a
-//! [`StyleRefinement`] as JSON, and anything beyond `div` and text is a
+//! [`StyleRefinement`] as GPUI serializes it, and anything beyond `div` and text is a
 //! component the embedding application registers by name
 //! ([`Runtime::register`]).
 //!
@@ -23,10 +23,10 @@ use std::{any::Any, collections::HashMap, path::Path, rc::Rc};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle,
-    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    Overflow, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Styled, WeakEntity, Window, div, point, px,
+    AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, Overflow,
+    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
+    Styled, WeakEntity, Window, div, point, px,
 };
 use serde_json::{Value, json};
 use wasmtime::{
@@ -537,20 +537,9 @@ impl Render for PluginView {
     }
 }
 
-/// A node's style: [`StyleRefinement`] as GPUI itself reads it, except that
-/// `background` is a plain color.
+/// A node's style: [`StyleRefinement`] as GPUI itself writes and reads it.
 fn parse_style(json: &str) -> Result<StyleRefinement> {
-    let mut value: Value = serde_json::from_str(json)?;
-    let background = value
-        .as_object_mut()
-        .and_then(|style| style.remove("background"));
-    let mut style: StyleRefinement = serde_json::from_value(value)?;
-    if let Some(background) = background {
-        style.background = Some(Fill::Color(
-            serde_json::from_value::<Hsla>(background)?.into(),
-        ));
-    }
-    Ok(style)
+    Ok(serde_json::from_str(json)?)
 }
 
 #[cfg(test)]

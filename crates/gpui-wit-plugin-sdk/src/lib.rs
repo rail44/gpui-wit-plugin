@@ -15,7 +15,7 @@
 //! impl Render for Counter {
 //!     fn render(&mut self, cx: &mut Cx<Self>) -> Element {
 //!         div()
-//!             .p(8.)
+//!             .p_2()
 //!             .on_click(cx.listener(|this, _, cx| {
 //!                 this.0 += 1;
 //!                 cx.notify();
@@ -40,7 +40,9 @@ pub use serde_json::{self, Value, json};
 mod diff;
 mod element;
 
-pub use element::{Element, Length, component, div, px, relative, rems, text};
+pub use element::{Element, component, div, text};
+/// GPUI, for what an element is styled with.
+pub use gpui::{self, Styled, px, relative, rems, rgb, rgba};
 
 #[doc(hidden)]
 pub mod bindings {

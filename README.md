@@ -10,14 +10,17 @@ when it renders.
 - `crates/gpui-wit-plugin` — the host. Depends on `gpui`, `wasmtime` and
   `wasmtime-wasi` only. A node is a `div`, text, or a component the embedding
   application registered by name; a node's style is GPUI's own
-  `StyleRefinement` as JSON, read by GPUI's own `Deserialize`. Component
+  `StyleRefinement`, as GPUI's own `Serialize` and `Deserialize` write and
+  read it. Component
   libraries (gpui-kit and the like) are layers on top: they register
   components, the host knows none.
 - `crates/gpui-wit-plugin-sdk` — writes a plugin the way a GPUI view is
   written: `render` returns the whole tree, `cx.notify()` renders again,
   `cx.new` makes child views that render on their own, `cx.emit` /
-  `cx.subscribe` connect them. Only the difference between two renders
-  crosses to the host.
+  `cx.subscribe` connect them. An element is styled with GPUI's own
+  `Styled` (`.flex().p_2().bg(rgb(0xffffff))`), so the SDK depends on `gpui`
+  for its style types. Only the difference between two renders crosses to
+  the host.
 - `examples/todo` — a plugin using all of the above, and what the host's test
   loads.
 
@@ -40,18 +43,23 @@ One run on the machine this was written on, median of each:
 
 | | ms |
 |---|---|
-| The plugin's first call (reads its file, renders every row) | 1.0 |
-| Applying what that call answered | 0.6 |
+| The plugin's first call (reads its file, renders every row) | 1.1 |
+| Applying what that call answered | 0.8 to 1.4 |
 | A click on one row: the plugin's call | 0.02 |
 | Applying what that call answered | 0.001 |
-| Drawing the view again after it | 1.2 |
+| Drawing the view again after it | 1.3 |
 | Drawing the same tree from a view written against GPUI directly | 1.2 |
 
 A change costs what it costs a GPUI view of the same size: the call across
 the boundary is small beside the draw. A first render of the same shape
 run natively, with no boundary to cross, takes 0.6 ms
-(`cargo test --release -p gpui-wit-plugin-sdk -- --ignored --nocapture`),
-0.2 ms of it building the elements, whose styles are JSON maps.
+(`cargo test --release -p gpui-wit-plugin-sdk -- --ignored --nocapture`).
+The numbers move by half again from run to run on a busy machine; the
+ratios hold.
+
+The example's component is 306 KB. A first build of a plugin compiles
+`gpui` for `wasm32-wasip2` (under half a minute here); a rebuild takes a
+few seconds.
 
 ## Not there yet
 

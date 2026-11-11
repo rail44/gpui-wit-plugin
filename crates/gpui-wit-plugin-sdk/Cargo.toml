@@ -5,5 +5,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# For its style types alone: an element is styled with GPUI's own `Styled`,
+# and its style crosses to the host as GPUI serializes it.
+gpui = { package = "gpui-pre", version = "0.3.11" }
 serde_json.workspace = true
 wit-bindgen = "0.63"

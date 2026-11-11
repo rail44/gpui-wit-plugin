@@ -7,7 +7,8 @@
 
 use std::{collections::HashMap, rc::Rc};
 
-use serde_json::{Map, Value};
+use gpui::StyleRefinement;
+use serde_json::Value;
 
 use crate::{
     AnyView, Mutation, Name,
@@ -25,10 +26,10 @@ pub(crate) struct Retained {
     component: Option<Name>,
     is_text: bool,
     text: String,
-    style: Map<String, Value>,
-    hover: Map<String, Value>,
+    style: StyleRefinement,
+    hover: Option<Box<StyleRefinement>>,
     group: Option<Name>,
-    group_hover: Option<(Name, Map<String, Value>)>,
+    group_hover: Option<(Name, Box<StyleRefinement>)>,
     props: Value,
     listeners: Listeners,
     children: Vec<Kept>,
@@ -201,8 +202,8 @@ impl Differ {
             component,
             is_text,
             text: String::new(),
-            style: Map::new(),
-            hover: Map::new(),
+            style: StyleRefinement::default(),
+            hover: None,
             group: None,
             group_hover: None,
             props: Value::Null,
@@ -226,7 +227,10 @@ impl Differ {
             old.style = element.style;
         }
         if old.hover != element.hover {
-            let style = serde_json::to_string(&element.hover).unwrap_or_default();
+            let style = match &element.hover {
+                Some(style) => serde_json::to_string(style).unwrap_or_default(),
+                None => "{}".to_owned(),
+            };
             self.batch.push(Mutation::SetHoverStyle((id, style)));
             old.hover = element.hover;
         }

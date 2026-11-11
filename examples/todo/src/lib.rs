@@ -23,14 +23,15 @@ impl Render for Row {
     fn render(&mut self, cx: &mut Cx<Self>) -> Element {
         let mark = if self.done { "[x]" } else { "[ ]" };
         div()
+            .flex()
             .flex_row()
-            .gap(8.)
+            .gap_2()
             .group("row")
             .child(
                 div()
                     .flex_1()
                     .cursor_pointer()
-                    .hover(|style| style.bg("#f0f0f0"))
+                    .hover(|style| style.bg(rgb(0xf0f0f0)))
                     .on_click(cx.listener(|this, _, cx| {
                         this.done = !this.done;
                         cx.emit(RowEvent::Toggled);
@@ -117,12 +118,13 @@ impl Render for Todo {
             presses => format!("{left} left, {presses} pressed"),
         };
         div()
+            .flex()
             .flex_col()
             .size_full()
-            .p(8.)
-            .gap(4.)
-            .bg("#ffffff")
-            .text_color("#202020")
+            .p_2()
+            .gap_1()
+            .bg(rgb(0xffffff))
+            .text_color(rgb(0x202020))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .track_focus(&self.focus)
