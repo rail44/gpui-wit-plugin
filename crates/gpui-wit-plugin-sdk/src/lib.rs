@@ -72,7 +72,8 @@ pub struct Cx<V> {
     key: u32,
     notified: bool,
     handlers: Vec<Handler<V>>,
-    subscriptions: Vec<(u32, Subscriber<V>)>,
+    /// What this view does with what each view it hears emits.
+    subscriptions: HashMap<u32, Vec<Subscriber<V>>>,
 }
 
 impl<V: 'static> Cx<V> {
@@ -113,16 +114,23 @@ impl<V: 'static> Cx<V> {
         entity: &Entity<C>,
         on_event: impl Fn(&mut V, &E, &mut Cx<V>) + 'static,
     ) {
-        // Views that are gone emit nothing more.
-        self.subscriptions.retain(|(key, _)| view(*key).is_some());
-        self.subscriptions.push((
-            entity.0.key,
-            Rc::new(move |view, event, cx| {
-                if let Some(event) = event.downcast_ref::<E>() {
-                    on_event(view, event, cx);
-                }
-            }),
-        ));
+        let (emitter, subscriber) = (entity.0.key, self.key);
+        let on_event: Subscriber<V> = Rc::new(move |view, event, cx| {
+            if let Some(event) = event.downcast_ref::<E>() {
+                on_event(view, event, cx);
+            }
+        });
+        self.subscriptions
+            .entry(emitter)
+            .or_default()
+            .push(on_event);
+        SUBSCRIBERS.with(|subscribers| {
+            let mut subscribers = subscribers.borrow_mut();
+            let hearing = subscribers.entry(emitter).or_default();
+            if !hearing.contains(&subscriber) {
+                hearing.push(subscriber);
+            }
+        });
     }
 }
 
@@ -174,6 +182,10 @@ impl ScrollHandle {
 
 thread_local! {
     static VIEWS: RefCell<HashMap<u32, Weak<dyn AnyView>>> = RefCell::new(HashMap::new());
+    /// For each view that is heard, the views hearing it.
+    static SUBSCRIBERS: RefCell<HashMap<u32, Vec<u32>>> = RefCell::new(HashMap::new());
+    /// Views dropped since their subscribers were last told.
+    static GONE: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
     static NEXT_VIEW: Cell<u32> = const { Cell::new(1) };
     /// Views that notified and have not rendered since.
     static DIRTY: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -206,7 +218,7 @@ impl<C: Render> Entity<C> {
             key,
             notified: false,
             handlers: Vec::new(),
-            subscriptions: Vec::new(),
+            subscriptions: HashMap::new(),
         };
         let view = build(&mut cx);
         let cell = Rc::new(ViewCell {
@@ -264,6 +276,8 @@ impl<C> ViewCell<C> {
 impl<C> Drop for ViewCell<C> {
     fn drop(&mut self) {
         let _ = VIEWS.try_with(|views| views.borrow_mut().remove(&self.key));
+        // Its subscribers forget it later: one of them may be running now.
+        let _ = GONE.try_with(|gone| gone.borrow_mut().push(self.key));
     }
 }
 
@@ -280,6 +294,8 @@ pub(crate) trait AnyView {
     fn sync(&self, differ: &mut Differ, standalone: bool);
     fn dispatch(&self, callback: u32, payload: &Value);
     fn deliver(&self, from: u32, event: &dyn Any);
+    /// Drops what the view does with what view `emitter` emits.
+    fn forget(&self, emitter: u32);
     fn host_event(&self, name: &str, payload: &Value);
     #[cfg(test)]
     fn subscription_count(&self) -> usize;
@@ -337,13 +353,16 @@ impl<C: Render> AnyView for ViewCell<C> {
     }
 
     fn deliver(&self, from: u32, event: &dyn Any) {
-        let subscribers: Vec<_> = (self.state.borrow().1.subscriptions.iter())
-            .filter(|(key, _)| *key == from)
-            .map(|(_, subscriber)| subscriber.clone())
-            .collect();
-        for subscriber in subscribers {
+        let subscribers = self.state.borrow().1.subscriptions.get(&from).cloned();
+        for subscriber in subscribers.unwrap_or_default() {
             self.run(|view, cx| subscriber(view, event, cx));
         }
+    }
+
+    fn forget(&self, emitter: u32) {
+        // Dropped outside the borrow: a subscriber may own views itself.
+        let forgotten = self.state.borrow_mut().1.subscriptions.remove(&emitter);
+        drop(forgotten);
     }
 
     fn host_event(&self, name: &str, payload: &Value) {
@@ -352,7 +371,9 @@ impl<C: Render> AnyView for ViewCell<C> {
 
     #[cfg(test)]
     fn subscription_count(&self) -> usize {
-        self.state.borrow().1.subscriptions.len()
+        (self.state.borrow().1.subscriptions.values())
+            .map(Vec::len)
+            .sum()
     }
 }
 
@@ -365,10 +386,12 @@ fn flush(differ: &mut Differ) -> Vec<Mutation> {
         if emitted.is_empty() && dirty.is_empty() {
             break;
         }
-        let views: Vec<_> = VIEWS.with(|views| views.borrow().values().cloned().collect());
         for (from, event) in emitted {
-            for view in views.iter().filter_map(Weak::upgrade) {
-                view.deliver(from, &*event);
+            let hearing = SUBSCRIBERS.with(|subscribers| subscribers.borrow().get(&from).cloned());
+            for subscriber in hearing.unwrap_or_default() {
+                if let Some(view) = view(subscriber) {
+                    view.deliver(from, &*event);
+                }
             }
         }
         differ.pass += 1;
@@ -381,6 +404,7 @@ fn flush(differ: &mut Differ) -> Vec<Mutation> {
             }
         }
     }
+    forget_gone();
     let mut batch = differ.take();
     let after = AFTER.with(|after| std::mem::take(&mut *after.borrow_mut()));
     // A handle no element has taken has no node to act on.
@@ -396,6 +420,24 @@ fn flush(differ: &mut Differ) -> Vec<Mutation> {
             }),
     );
     batch
+}
+
+/// Has the subscribers of every view dropped since the last call forget it.
+fn forget_gone() {
+    loop {
+        let gone = GONE.with(|gone| std::mem::take(&mut *gone.borrow_mut()));
+        if gone.is_empty() {
+            return;
+        }
+        for emitter in gone {
+            let hearing = SUBSCRIBERS.with(|subscribers| subscribers.borrow_mut().remove(&emitter));
+            for subscriber in hearing.unwrap_or_default() {
+                if let Some(view) = view(subscriber) {
+                    view.forget(emitter);
+                }
+            }
+        }
+    }
 }
 
 #[doc(hidden)]

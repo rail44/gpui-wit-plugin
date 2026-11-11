@@ -196,6 +196,38 @@ fn a_plugin_that_fails_is_drawn_as_its_error(cx: &mut TestAppContext) {
     assert_eq!(view.update(cx, |view, _| view.outline()), failed);
 }
 
+/// A node that replaces another takes its place under the same parent.
+#[gpui::test]
+fn a_replacement_takes_the_place_of_what_it_replaces(cx: &mut TestAppContext) {
+    use super::{Kind, Mutation};
+
+    let runtime = Rc::new(Runtime::new().unwrap());
+    let component = runtime.load(example("todo")).unwrap();
+    let instance = runtime
+        .instantiate(&component, WasiCtxBuilder::new().build(), Box::new(()))
+        .unwrap();
+    let window = cx.add_window(|_, cx| PluginView::new(&runtime, instance, cx));
+    let view = window.root(cx).unwrap();
+    view.update(cx, |view, cx| {
+        // Numbers the plugin itself is far from.
+        let (parent, before, old, new) = (9000, 9001, 9002, 9003);
+        view.apply(
+            vec![
+                Mutation::Create((parent, Kind::Element)),
+                Mutation::Create((before, Kind::Text)),
+                Mutation::Create((old, Kind::Text)),
+                Mutation::Create((new, Kind::Text)),
+                Mutation::SetChildren((parent, vec![before, old])),
+                Mutation::Replace((old, new)),
+            ],
+            cx,
+        );
+        assert_eq!(view.error, None);
+        assert_eq!(view.nodes[&parent].children, [before, new]);
+        assert_eq!(view.nodes[&new].parent, Some(parent));
+    });
+}
+
 /// Times a list of 100 rows: `cargo test --release -- --ignored --nocapture`.
 #[gpui::test]
 #[ignore = "a measurement, not a check"]

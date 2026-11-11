@@ -172,9 +172,9 @@ fn hearing_views_that_are_gone_does_not_pile_up() {
         __event(0, "replace", "null");
     }
     let root = crate::ROOT.with(|root| root.borrow().clone()).unwrap();
-    // The row in place, and the one it replaced, which was still placed
-    // when the newest was heard.
-    assert!(root.subscription_count() <= 2);
+    assert_eq!(root.subscription_count(), 1, "only the row in place");
+    let heard = crate::SUBSCRIBERS.with(|subscribers| subscribers.borrow().len());
+    assert_eq!(heard, 1);
 }
 
 struct Styled(usize);
@@ -235,7 +235,7 @@ fn measure_a_first_render() {
         key: 0,
         notified: false,
         handlers: Vec::new(),
-        subscriptions: Vec::new(),
+        subscriptions: std::collections::HashMap::new(),
     };
     let mut builds = Vec::new();
     let mut serials = Vec::new();

@@ -162,6 +162,8 @@ struct Node {
     text: SharedString,
     props: Value,
     children: Vec<u64>,
+    /// The node this one was last made a child of.
+    parent: Option<u64>,
     events: Vec<String>,
     focus: Option<FocusHandle>,
     scroll: Option<ScrollHandle>,
@@ -304,6 +306,7 @@ impl PluginView {
                     text: SharedString::default(),
                     props: Value::Null,
                     children: Vec::new(),
+                    parent: None,
                     events: Vec::new(),
                     focus: None,
                     scroll: None,
@@ -315,12 +318,16 @@ impl PluginView {
                 if self.root == Some(old) {
                     self.root = Some(new);
                 }
-                for node in self.nodes.values_mut() {
-                    for child in &mut node.children {
+                let parent = self.nodes.get(&old).and_then(|node| node.parent);
+                if let Some(parent) = parent.and_then(|parent| self.nodes.get_mut(&parent)) {
+                    for child in &mut parent.children {
                         if *child == old {
                             *child = new;
                         }
                     }
+                }
+                if let Some(node) = self.nodes.get_mut(&new) {
+                    node.parent = parent;
                 }
                 return Ok(());
             }
@@ -345,6 +352,13 @@ impl PluginView {
             | Mutation::ScrollTo((id, _))
             | Mutation::Focus(id) => (id, mutation),
         };
+        if let Mutation::SetChildren((_, children)) = &change {
+            for child in children {
+                if let Some(child) = self.nodes.get_mut(child) {
+                    child.parent = Some(id);
+                }
+            }
+        }
         // The root node's focus is the view's own.
         let view_focus = (self.root == Some(id)).then(|| self.focus.clone());
         let node = self.nodes.get_mut(&id).ok_or_else(|| {
