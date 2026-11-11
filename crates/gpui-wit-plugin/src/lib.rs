@@ -24,9 +24,9 @@ use std::{any::Any, collections::HashMap, path::Path, rc::Rc};
 use anyhow::Result;
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Empty, EventEmitter, Fill, FocusHandle,
-    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity,
-    Window, div, point, px,
+    Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Overflow, ParentElement,
+    Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
+    WeakEntity, Window, div, point, px,
 };
 use serde_json::{Value, json};
 use wasmtime::{
@@ -84,10 +84,8 @@ pub struct Emit {
 }
 
 impl Emit {
-    pub fn emit(&self, name: &str, payload: Value, window: &mut Window, cx: &mut App) {
-        let _ = self.view.update(cx, |view, cx| {
-            view.dispatch(self.node, name, &payload, window, cx)
-        });
+    pub fn emit(&self, name: &str, payload: Value, cx: &mut App) {
+        let _ = (self.view).update(cx, |view, cx| view.dispatch(self.node, name, &payload, cx));
     }
 }
 
@@ -187,6 +185,8 @@ pub struct PluginView {
     /// The view's own focus, which the root node tracks: focusing the view
     /// sends keys to the plugin's root element.
     focus: FocusHandle,
+    /// Where the plugin asked focus to go, moved there by the next draw.
+    pending_focus: Option<FocusHandle>,
     /// Whether the plugin asked that the event it just handled stop here.
     stop: bool,
     /// Why the plugin stopped, drawn in its place.
@@ -202,12 +202,7 @@ impl Focusable for PluginView {
 impl PluginView {
     /// Runs the plugin's `init` and keeps what it described. A plugin that
     /// fails, here or later, is drawn as the error it failed with.
-    pub fn new(
-        runtime: &Rc<Runtime>,
-        instance: Instance,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(runtime: &Rc<Runtime>, instance: Instance, cx: &mut Context<Self>) -> Self {
         let Instance { mut store, plugin } = instance;
         let init = plugin.call_init(&mut store);
         let mut view = Self {
@@ -217,14 +212,43 @@ impl PluginView {
             nodes: HashMap::new(),
             root: None,
             focus: cx.focus_handle(),
+            pending_focus: None,
             stop: false,
             error: None,
         };
         match init {
-            Ok(batch) => view.apply(batch, window, cx),
+            Ok(batch) => view.apply(batch, cx),
             Err(error) => view.error = Some(format!("{error:#}").into()),
         }
         view
+    }
+
+    /// What the plugin has described, for a test or a log to read: each
+    /// text and each component (as `<name props>`) with its node's number,
+    /// in the order they are drawn. An error the plugin stopped with is the
+    /// only line, numbered 0.
+    pub fn outline(&self) -> Vec<(u64, String)> {
+        fn walk(view: &PluginView, id: u64, lines: &mut Vec<(u64, String)>) {
+            let Some(node) = view.nodes.get(&id) else {
+                return;
+            };
+            match &node.kind {
+                Kind::Text => lines.push((id, node.text.to_string())),
+                Kind::Component(name) => lines.push((id, format!("<{name} {}>", node.props))),
+                Kind::Element => {}
+            }
+            for child in &node.children {
+                walk(view, *child, lines);
+            }
+        }
+        if let Some(error) = &self.error {
+            return vec![(0, error.to_string())];
+        }
+        let mut lines = Vec::new();
+        if let Some(root) = self.root {
+            walk(self, root, &mut lines);
+        }
+        lines
     }
 
     /// The plugin's store state, where [`State::data`] is.
@@ -234,14 +258,7 @@ impl PluginView {
 
     /// Hands the plugin an event and applies what it answers. `target` 0 is
     /// the view as a whole: how an application tells a plugin something.
-    pub fn dispatch(
-        &mut self,
-        target: u64,
-        name: &str,
-        payload: &Value,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn dispatch(&mut self, target: u64, name: &str, payload: &Value, cx: &mut Context<Self>) {
         if self.error.is_some() {
             return;
         }
@@ -250,28 +267,23 @@ impl PluginView {
             .plugin
             .call_event(&mut self.store, target, name, &payload)
         {
-            Ok(batch) => self.apply(batch, window, cx),
+            Ok(batch) => self.apply(batch, cx),
             Err(error) => self.error = Some(format!("{error:#}").into()),
         }
         cx.emit(Returned);
         cx.notify();
     }
 
-    fn apply(&mut self, batch: Vec<Mutation>, window: &mut Window, cx: &mut Context<Self>) {
+    fn apply(&mut self, batch: Vec<Mutation>, cx: &mut Context<Self>) {
         for mutation in batch {
-            if let Err(error) = self.apply_one(mutation, window, cx) {
+            if let Err(error) = self.apply_one(mutation, cx) {
                 self.error = Some(format!("{error:#}").into());
                 return;
             }
         }
     }
 
-    fn apply_one(
-        &mut self,
-        mutation: Mutation,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<()> {
+    fn apply_one(&mut self, mutation: Mutation, cx: &mut Context<Self>) -> Result<()> {
         let (id, change) = match mutation {
             Mutation::Create((id, kind)) => {
                 let node = Node {
@@ -327,7 +339,15 @@ impl PluginView {
             anyhow::anyhow!("the plugin changed node {id}, which it has not made")
         })?;
         match change {
-            Mutation::SetStyle((_, style)) => node.style = parse_style(&style)?,
+            Mutation::SetStyle((_, style)) => {
+                node.style = parse_style(&style)?;
+                // An element that scrolls is measured from its first draw,
+                // so that a scroll the plugin asks for has bounds to meet.
+                let overflow = &node.style.overflow;
+                if [overflow.x, overflow.y].contains(&Some(Overflow::Scroll)) {
+                    node.scroll.get_or_insert_default();
+                }
+            }
             Mutation::SetText((_, text)) => node.text = text.into(),
             Mutation::SetProps((_, props)) => node.props = serde_json::from_str(&props)?,
             Mutation::SetChildren((_, children)) => node.children = children,
@@ -341,7 +361,7 @@ impl PluginView {
             Mutation::Focus(_) => {
                 let handle = view_focus
                     .unwrap_or_else(|| node.focus.get_or_insert_with(|| cx.focus_handle()).clone());
-                window.focus(&handle, cx);
+                self.pending_focus = Some(handle);
             }
             Mutation::ScrollBy((_, pixels, pages)) => {
                 let handle = node.scroll.get_or_insert_default();
@@ -385,16 +405,16 @@ impl PluginView {
                 }
                 for event in &node.events {
                     element = match event.as_str() {
-                        "click" => element.on_click(cx.listener(
-                            move |view, _: &ClickEvent, window, cx| {
-                                view.dispatch(id, "click", &Value::Null, window, cx);
+                        "click" => {
+                            element.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                                view.dispatch(id, "click", &Value::Null, cx);
                                 if std::mem::take(&mut view.stop) {
                                     cx.stop_propagation();
                                 }
-                            },
-                        )),
+                            }))
+                        }
                         "key_down" => element.on_key_down(cx.listener(
-                            move |view, event: &KeyDownEvent, window, cx| {
+                            move |view, event: &KeyDownEvent, _, cx| {
                                 let modifiers = event.keystroke.modifiers;
                                 let payload = json!({
                                     "key": event.keystroke.key,
@@ -403,7 +423,7 @@ impl PluginView {
                                     "shift": modifiers.shift,
                                     "platform": modifiers.platform,
                                 });
-                                view.dispatch(id, "key_down", &payload, window, cx);
+                                view.dispatch(id, "key_down", &payload, cx);
                                 if std::mem::take(&mut view.stop) {
                                     cx.stop_propagation();
                                 }
@@ -436,6 +456,9 @@ impl PluginView {
 
 impl Render for PluginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(focus) = self.pending_focus.take() {
+            window.focus(&focus, cx);
+        }
         match (&self.error, self.root) {
             (Some(error), _) => error.clone().into_any_element(),
             (None, Some(root)) => self.element(root, window, cx),

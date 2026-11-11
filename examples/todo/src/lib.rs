@@ -49,6 +49,7 @@ struct Todo {
     rows: Vec<Entity<Row>>,
     next: u32,
     focus: FocusHandle,
+    scroll: ScrollHandle,
 }
 
 impl Todo {
@@ -57,6 +58,7 @@ impl Todo {
             rows: Vec::new(),
             next: 0,
             focus: FocusHandle::new(),
+            scroll: ScrollHandle::new(),
         };
         let initial = std::env::var("TODO_FILE")
             .ok()
@@ -106,11 +108,15 @@ impl Render for Todo {
             .gap(4.)
             .bg("#ffffff")
             .text_color("#202020")
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, cx| {
                 if event["key"] == "a" {
                     this.add(format!("item {}", this.next + 1), cx);
                     cx.notify();
+                } else if event["key"] == "d" {
+                    this.scroll.scroll_by(10., 0.);
                 }
             }))
             .child(

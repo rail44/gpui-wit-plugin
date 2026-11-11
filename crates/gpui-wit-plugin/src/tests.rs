@@ -7,7 +7,7 @@ use gpui::{
 use serde_json::Value;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
-use super::{Kind, PluginView, Runtime};
+use super::{PluginView, Runtime};
 
 /// Builds the example plugin `name` and returns its component.
 fn example(name: &str) -> PathBuf {
@@ -25,34 +25,22 @@ fn example(name: &str) -> PathBuf {
 
 /// The tree a plugin has described, one node per line, as `id text`.
 fn outline(view: &Entity<PluginView>, cx: &mut VisualTestContext) -> Vec<String> {
-    fn walk(view: &PluginView, id: u64, lines: &mut Vec<String>) {
-        let node = &view.nodes[&id];
-        match &node.kind {
-            Kind::Text => lines.push(format!("{id} {}", node.text)),
-            Kind::Component(name) => lines.push(format!("{id} <{name} {}>", node.props)),
-            Kind::Element => {}
-        }
-        for child in &node.children {
-            walk(view, *child, lines);
-        }
-    }
     view.update(cx, |view, _| {
-        assert_eq!(view.error, None);
-        let mut lines = Vec::new();
-        walk(view, view.root.expect("a root"), &mut lines);
-        lines
+        (view.outline().iter())
+            .map(|(id, line)| format!("{id} {line}"))
+            .collect()
     })
 }
 
 /// Clicks the element whose text is `label`, as the element would report it.
 fn click(view: &Entity<PluginView>, label: &str, cx: &mut VisualTestContext) {
-    view.update_in(cx, |view, window, cx| {
+    view.update_in(cx, |view, _, cx| {
         let (id, _) = (view.nodes.iter())
             .find(|(_, node)| {
                 (node.children.iter()).any(|child| view.nodes[child].text.as_ref() == label)
             })
             .expect("the element");
-        view.dispatch(*id, "click", &Value::Null, window, cx);
+        view.dispatch(*id, "click", &Value::Null, cx);
     });
 }
 
@@ -69,7 +57,7 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
         div()
             .id(props.id)
             .debug_selector(|| "badge".into())
-            .on_click(move |_, window, cx| emit.emit("pressed", Value::Null, window, cx))
+            .on_click(move |_, _, cx| emit.emit("pressed", Value::Null, cx))
             .child(SharedString::from(label))
             .into_any_element()
     });
@@ -83,7 +71,7 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     let instance = runtime
         .instantiate(&component, wasi.build(), Box::new(()))
         .unwrap();
-    let window = cx.add_window(|window, cx| PluginView::new(&runtime, instance, window, cx));
+    let window = cx.add_window(|_, cx| PluginView::new(&runtime, instance, cx));
     let view = window.root(cx).unwrap();
     let cx = &mut VisualTestContext::from_window(*window.deref(), cx);
     cx.run_until_parked();
@@ -132,12 +120,12 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
     assert_eq!(ids(&first), ids(&added)[..6]);
 
     // A row removes itself by telling the list; the rows after it stay.
-    view.update_in(cx, |view, window, cx| {
+    view.update_in(cx, |view, _, cx| {
         let remove = ids(&added)[3].parse::<u64>().unwrap();
         let (id, _) = (view.nodes.iter())
             .find(|(_, node)| node.children.contains(&remove))
             .unwrap();
-        view.dispatch(*id, "click", &Value::Null, window, cx);
+        view.dispatch(*id, "click", &Value::Null, cx);
     });
     let removed = outline(&view, cx);
     assert_eq!(texts(&removed)[2..4], ["[ ] review", "remove"]);
@@ -154,12 +142,29 @@ fn a_plugin_draws_and_hears_events(cx: &mut TestAppContext) {
             count.set(count.get() + 1)
         })
     });
-    view.update_in(cx, |view, window, cx| {
-        view.dispatch(0, "add", &Value::from("told"), window, cx);
+    view.update_in(cx, |view, _, cx| {
+        view.dispatch(0, "add", &Value::from("told"), cx);
     });
     assert_eq!(texts(&outline(&view, cx)).last().unwrap(), "remove");
     assert!(texts(&outline(&view, cx)).contains(&"[ ] told".to_owned()));
     assert_eq!(returned.get(), 1);
+
+    // The plugin scrolls its own element, once there is more than fits.
+    let offset = |cx: &mut VisualTestContext| {
+        view.update(cx, |view, _| {
+            let root = &view.nodes[&view.root.unwrap()];
+            root.scroll.as_ref().expect("a scrolling root").offset().y
+        })
+    };
+    for row in 0..80 {
+        view.update_in(cx, |view, _, cx| {
+            view.dispatch(0, "add", &Value::from(format!("row {row}")), cx);
+        });
+    }
+    cx.run_until_parked();
+    assert_eq!(offset(cx), px(0.));
+    cx.simulate_keystrokes("d d");
+    assert_eq!(offset(cx), px(-20.));
 
     // An event of a registered component, from a real click on it.
     let badge = cx.debug_bounds("badge").expect("the badge");
